@@ -13,15 +13,13 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.sqs.javamessaging;
+package software.amazon.awssdk.services.sqs;
 
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.services.s3.AmazonS3;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import com.amazonaws.annotation.NotThreadSafe;
-
-import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.annotations.NotThreadSafe;
+import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.services.s3.S3Client;
 
 /**
  * Amazon SQS extended client configuration options such as Amazon S3 client,
@@ -29,9 +27,9 @@ import java.util.List;
  */
 @NotThreadSafe
 public class ExtendedClientConfiguration {
-	private static final Log LOG = LogFactory.getLog(ExtendedClientConfiguration.class);
+	private static final Logger LOG = LoggerFactory.getLogger(ExtendedClientConfiguration.class);
 
-	private AmazonS3 s3;
+	private S3Client s3;
 	private String s3BucketName;
 	private boolean largePayloadSupport = false;
 	private boolean alwaysThroughS3 = false;
@@ -61,11 +59,11 @@ public class ExtendedClientConfiguration {
 	 *            large-payload messages. The bucket must be already created and
 	 *            configured in s3.
 	 */
-	public void setLargePayloadSupportEnabled(AmazonS3 s3, String s3BucketName) {
+	public void setLargePayloadSupportEnabled(S3Client s3, String s3BucketName) {
 		if (s3 == null || s3BucketName == null) {
 			String errorMessage = "S3 client and/or S3 bucket name cannot be null.";
 			LOG.error(errorMessage);
-			throw new AmazonClientException(errorMessage);
+			throw SdkClientException.create(errorMessage);
 		}
 		if (isLargePayloadSupportEnabled()) {
 			LOG.warn("Large-payload support is already enabled. Overwriting AmazonS3Client and S3BucketName.");
@@ -88,7 +86,7 @@ public class ExtendedClientConfiguration {
 	 *            configured in s3.
 	 * @return the updated ExtendedClientConfiguration object.
 	 */
-	public ExtendedClientConfiguration withLargePayloadSupportEnabled(AmazonS3 s3, String s3BucketName) {
+	public ExtendedClientConfiguration withLargePayloadSupportEnabled(S3Client s3, String s3BucketName) {
 		setLargePayloadSupportEnabled(s3, s3BucketName);
 		return this;
 	}
@@ -127,7 +125,7 @@ public class ExtendedClientConfiguration {
 	 *
 	 * @return Reference to the Amazon S3 client which is being used.
 	 */
-	public AmazonS3 getAmazonS3Client() {
+	public S3Client getAmazonS3Client() {
 		return s3;
 	}
 

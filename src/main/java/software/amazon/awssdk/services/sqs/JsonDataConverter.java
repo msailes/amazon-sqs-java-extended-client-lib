@@ -13,14 +13,14 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.sqs.javamessaging;
+package software.amazon.awssdk.services.sqs;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.ObjectMapper.DefaultTyping;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
  * This class implements conversion through Jackson JSON processor. Methods are

@@ -13,7 +13,7 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.sqs.javamessaging;
+package software.amazon.awssdk.services.sqs;
 
 /**
  * This class is used for carrying pointer to Amazon S3 objects which contain

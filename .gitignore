@@ -1,1 +1,3 @@
 target/
+/.idea/
+/amazon-sqs-java-extended-client-lib.iml

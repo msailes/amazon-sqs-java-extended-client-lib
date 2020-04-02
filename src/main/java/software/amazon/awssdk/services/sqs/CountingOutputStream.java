@@ -13,7 +13,7 @@
  * permissions and limitations under the License.
  */
 
-package com.amazon.sqs.javamessaging;
+package software.amazon.awssdk.services.sqs;
 
 import java.io.OutputStream;
 
