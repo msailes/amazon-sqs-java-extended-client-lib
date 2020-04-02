@@ -10,6 +10,18 @@ Amazon SQS Extended Client Library for Java
 - [x] sendMessage(SendMessageRequest sendMessageRequest)
 - [ ] the rest
 
+### Usage
+
+```java
+ExtendedSqsClient extendedSqsClient = ExtendedSqsClient.defaultClient("your-bucket-name");
+SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
+        .queueUrl("https://sqs.eu-west-1.amazonaws.com/123456789012/your-queue")
+        .messageBody("your amazing message")
+        .build();
+
+extendedSqsClient.sendMessage(sendMessageRequest);
+```
+
 ## Original Project
 
 The **Amazon SQS Extended Client Library for Java** enables you to manage Amazon SQS message payloads with Amazon S3. This is especially useful for storing and retrieving messages with a message payload size greater than the current SQS limit of 256 KB, up to a maximum of 2 GB. Specifically, you can use this library to:
