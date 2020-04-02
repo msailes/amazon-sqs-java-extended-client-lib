@@ -49,9 +49,21 @@ public class ExtendedSqsClient implements SqsClient {
      *            The extended client configuration options controlling the
      *            functionality of this client.
      */
-    public ExtendedSqsClient(SqsClient sqsClient, ExtendedClientConfiguration extendedClientConfig) {
+    protected ExtendedSqsClient(SqsClient sqsClient, ExtendedClientConfiguration extendedClientConfig) {
         this.sqsClient = sqsClient;
         this.clientConfiguration = new ExtendedClientConfiguration(extendedClientConfig);
+    }
+
+    public static ExtendedSqsClient defaultClient(String s3BucketName) {
+        S3Client s3Client = S3Client.builder().build();
+        ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration().withLargePayloadSupportEnabled(s3Client, s3BucketName);
+        return new ExtendedSqsClientBuilder()
+                .withSqsClient(SqsClient.builder().build())
+                .withExtendedClientConfiguration(extendedClientConfiguration).build();
+    }
+
+    public static ExtendedSqsClientBuilder builder() {
+        return new ExtendedSqsClientBuilder();
     }
 
     @Override
