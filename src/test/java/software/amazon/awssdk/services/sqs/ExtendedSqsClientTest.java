@@ -121,6 +121,24 @@ public class ExtendedSqsClientTest {
         verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
     }
 
+    @Test
+    public void testWhenSendMessageWithSetMessageSizeThresholdThenThresholdIsHonored() {
+        int messageLength = ARBITRATY_SMALLER_THRESSHOLD * 2;
+        String messageBody = generateStringWithLength(messageLength);
+        ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
+                .withLargePayloadSupportEnabled(mockS3, S3_BUCKET_NAME)
+                .withMessageSizeThreshold(ARBITRATY_SMALLER_THRESSHOLD);
+
+        ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
+
+        SendMessageRequest messageRequest = SendMessageRequest.builder()
+                .queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody)
+                .build();
+        extendedSqsClient.sendMessage(messageRequest);
+        verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
+    }
+
     @Test(expected = SdkClientException.class)
     public void testNullMessageRequestThrowsClientException() {
         SendMessageRequest messageRequest = null;
