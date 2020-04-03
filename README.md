@@ -8,6 +8,8 @@ Amazon SQS Extended Client Library for Java
 ### Supported Methods
 
 - [x] sendMessage(SendMessageRequest sendMessageRequest)
+- [x] sendMessage(Consumer<SendMessageRequest.Builder> sendMessageRequest)
+- [ ] receiveMessage(ReceiveMessageRequest receiveMessageRequest)
 - [ ] the rest
 
 ### Usage

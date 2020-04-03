@@ -24,9 +24,11 @@ import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.sqs.model.InvalidMessageContentsException;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+import software.amazon.awssdk.services.sqs.model.SqsException;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -34,7 +36,27 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
+/**
+ * Extended SQS Client extends the functionality of SQS client.
+ * All service calls made using this client are blocking, and will not returnØ
+ * until the service call completes.
+ *
+ * <p>
+ * The Extended SQS extended client enables sending and receiving large messages
+ * via Amazon S3. You can use this library to:
+ * </p>
+ *
+ * <ul>
+ * <li>Specify whether messages are always stored in Amazon S3 or only when a
+ * message size exceeds 256 KB.</li>
+ * <li>Send a message that references a single message object stored in an
+ * Amazon S3 bucket.</li>
+ * <li>Get the corresponding message object from an Amazon S3 bucket.</li>
+ * <li>Delete the corresponding message object from an Amazon S3 bucket.</li>
+ * </ul>
+ */
 public class ExtendedSqsClient implements SqsClient {
     private static final Logger LOG = LoggerFactory.getLogger(ExtendedSqsClient.class);
 
@@ -84,6 +106,41 @@ public class ExtendedSqsClient implements SqsClient {
         this.sqsClient.close();
     }
 
+    /**
+     * <p>
+     * Delivers a message to the specified queue.
+     * </p>
+     * <important>
+     * <p>
+     * A message can include only XML, JSON, and unformatted text. The following Unicode characters are allowed:
+     * </p>
+     * <p>
+     * <code>#x9</code> | <code>#xA</code> | <code>#xD</code> | <code>#x20</code> to <code>#xD7FF</code> |
+     * <code>#xE000</code> to <code>#xFFFD</code> | <code>#x10000</code> to <code>#x10FFFF</code>
+     * </p>
+     * <p>
+     * Any characters not included in this list will be rejected. For more information, see the <a
+     * href="http://www.w3.org/TR/REC-xml/#charsets">W3C specification for characters</a>.
+     * </p>
+     * </important>
+     *
+     * @param sendMessageRequest
+     * @return Result of the SendMessage operation returned by the service.
+     * @throws InvalidMessageContentsException
+     *         The message contains characters outside the allowed set.
+     * @throws UnsupportedOperationException
+     *         Error code 400. Unsupported operation.
+     * @throws SdkException
+     *         Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
+     *         catch all scenarios.
+     * @throws SdkClientException
+     *         If any client side error occurs such as an IO related failure, failure to get credentials, etc.
+     * @throws SqsException
+     *         Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
+     * @sample SqsClient.SendMessage
+     * @see <a href="http://docs.aws.amazon.com/goto/WebAPI/sqs-2012-11-05/SendMessage" target="_top">AWS API
+     *      Documentation</a>
+     */
     @Override
     public SendMessageResponse sendMessage(SendMessageRequest sendMessageRequest) throws AwsServiceException, SdkClientException {
         if (sendMessageRequest == null) {
@@ -107,6 +164,50 @@ public class ExtendedSqsClient implements SqsClient {
         }
 
         return this.sqsClient.sendMessage(sendMessageRequest);
+    }
+
+    /**
+     * <p>
+     * Delivers a message to the specified queue.
+     * </p>
+     * <important>
+     * <p>
+     * A message can include only XML, JSON, and unformatted text. The following Unicode characters are allowed:
+     * </p>
+     * <p>
+     * <code>#x9</code> | <code>#xA</code> | <code>#xD</code> | <code>#x20</code> to <code>#xD7FF</code> |
+     * <code>#xE000</code> to <code>#xFFFD</code> | <code>#x10000</code> to <code>#x10FFFF</code>
+     * </p>
+     * <p>
+     * Any characters not included in this list will be rejected. For more information, see the <a
+     * href="http://www.w3.org/TR/REC-xml/#charsets">W3C specification for characters</a>.
+     * </p>
+     * </important><br/>
+     * <p>
+     * This is a convenience which creates an instance of the {@link SendMessageRequest.Builder} avoiding the need to
+     * create one manually via {@link SendMessageRequest#builder()}
+     * </p>
+     *
+     * @param sendMessageRequest
+     *        A {@link Consumer} that will call methods on {@link SendMessageRequest.Builder} to create a request.
+     * @return Result of the SendMessage operation returned by the service.
+     * @throws InvalidMessageContentsException
+     *         The message contains characters outside the allowed set.
+     * @throws UnsupportedOperationException
+     *         Error code 400. Unsupported operation.
+     * @throws SdkException
+     *         Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
+     *         catch all scenarios.
+     * @throws SdkClientException
+     *         If any client side error occurs such as an IO related failure, failure to get credentials, etc.
+     * @throws SqsException
+     *         Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
+     * @sample SqsClient.SendMessage
+     * @see <a href="http://docs.aws.amazon.com/goto/WebAPI/sqs-2012-11-05/SendMessage" target="_top">AWS API
+     *      Documentation</a>
+     */
+    public SendMessageResponse sendMessage(Consumer<SendMessageRequest.Builder> sendMessageRequest) throws AwsServiceException, SdkClientException {
+        return sendMessage(SendMessageRequest.builder().applyMutation(sendMessageRequest).build());
     }
 
     private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
