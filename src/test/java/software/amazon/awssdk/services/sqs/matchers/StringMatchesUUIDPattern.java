@@ -1,4 +1,4 @@
-package com.tomasmalmsten.matchers;
+package software.amazon.awssdk.services.sqs.matchers;
 
 import org.hamcrest.Description;
 import org.hamcrest.Factory;
@@ -6,7 +6,7 @@ import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeMatcher;
 
 public class StringMatchesUUIDPattern extends TypeSafeMatcher<String> {
-    private static final String UUID_REGEX = "[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}";
+    private static final String UUID_REGEX = "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}";
 
     @Override
     protected boolean matchesSafely(String s) {

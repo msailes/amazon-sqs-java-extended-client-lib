@@ -18,17 +18,21 @@ package software.amazon.awssdk.services.sqs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.UUID;
 
 public class ExtendedSqsClient implements SqsClient {
@@ -94,9 +98,15 @@ public class ExtendedSqsClient implements SqsClient {
             throw SdkClientException.create(errorMessage);
         }
 
-        SendMessageRequest updatedSendMessageRequest = storeMessageInS3(sendMessageRequest);
+        if (!clientConfiguration.isLargePayloadSupportEnabled()) {
+            return this.sqsClient.sendMessage(sendMessageRequest);
+        }
 
-        return this.sqsClient.sendMessage(updatedSendMessageRequest);
+        if (clientConfiguration.isAlwaysThroughS3() || isLarge(sendMessageRequest)) {
+            sendMessageRequest = storeMessageInS3(sendMessageRequest);
+        }
+
+        return this.sqsClient.sendMessage(sendMessageRequest);
     }
 
     private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
@@ -150,29 +160,36 @@ public class ExtendedSqsClient implements SqsClient {
 //            throw new AmazonClientException(errorMessage);
 //        }
 //    }
-//
-//    private int getMsgAttributesSize(Map<String, MessageAttributeValue> msgAttributes) {
-//        int totalMsgAttributesSize = 0;
-//        for (Map.Entry<String, MessageAttributeValue> entry : msgAttributes.entrySet()) {
-//            totalMsgAttributesSize += getStringSizeInBytes(entry.getKey());
-//
-//            MessageAttributeValue entryVal = entry.getValue();
-//            if (entryVal.dataType() != null) {
-//                totalMsgAttributesSize += getStringSizeInBytes(entryVal.dataType());
-//            }
-//
-//            String stringVal = entryVal.stringValue();
-//            if (stringVal != null) {
-//                totalMsgAttributesSize += getStringSizeInBytes(entryVal.stringValue());
-//            }
-//
-//            SdkBytes binaryVal = entryVal.binaryValue();
-//            if (binaryVal != null) {
-//                totalMsgAttributesSize += binaryVal.array().length;
-//            }
-//        }
-//        return totalMsgAttributesSize;
-//    }
+
+    private boolean isLarge(SendMessageRequest sendMessageRequest) {
+        int msgAttributesSize = getMsgAttributesSize(sendMessageRequest.messageAttributes());
+        long msgBodySize = getStringSizeInBytes(sendMessageRequest.messageBody());
+        long totalMsgSize = msgAttributesSize + msgBodySize;
+        return (totalMsgSize > clientConfiguration.getMessageSizeThreshold());
+    }
+
+    private int getMsgAttributesSize(Map<String, MessageAttributeValue> msgAttributes) {
+        int totalMsgAttributesSize = 0;
+        for (Map.Entry<String, MessageAttributeValue> entry : msgAttributes.entrySet()) {
+            totalMsgAttributesSize += getStringSizeInBytes(entry.getKey());
+
+            MessageAttributeValue entryVal = entry.getValue();
+            if (entryVal.dataType() != null) {
+                totalMsgAttributesSize += getStringSizeInBytes(entryVal.dataType());
+            }
+
+            String stringVal = entryVal.stringValue();
+            if (stringVal != null) {
+                totalMsgAttributesSize += getStringSizeInBytes(entryVal.stringValue());
+            }
+
+            SdkBytes binaryVal = entryVal.binaryValue();
+            if (binaryVal != null) {
+                totalMsgAttributesSize += getStringSizeInBytes(binaryVal.toString());
+            }
+        }
+        return totalMsgAttributesSize;
+    }
 
     private String getJSONFromS3Pointer(MessageS3Pointer s3Pointer) {
         String s3PointerStr = null;
@@ -211,7 +228,7 @@ public class ExtendedSqsClient implements SqsClient {
     private static long getStringSizeInBytes(String str) {
         CountingOutputStream counterOutputStream = new CountingOutputStream();
         try {
-            Writer writer = new OutputStreamWriter(counterOutputStream, "UTF-8");
+            Writer writer = new OutputStreamWriter(counterOutputStream, StandardCharsets.UTF_8);
             writer.write(str);
             writer.flush();
             writer.close();

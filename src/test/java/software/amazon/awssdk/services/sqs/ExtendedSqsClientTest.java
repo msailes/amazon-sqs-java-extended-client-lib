@@ -27,7 +27,7 @@ import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.util.Arrays;
 
-import static com.tomasmalmsten.matchers.StringMatchesUUIDPattern.matchesThePatternOfAUUID;
+import static software.amazon.awssdk.services.sqs.matchers.StringMatchesUUIDPattern.matchesThePatternOfAUUID;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.mockito.Matchers.any;
@@ -51,14 +51,14 @@ public class ExtendedSqsClientTest {
 
     @Before
     public void setupClient() {
-        mockS3 = mock(S3Client.class);
-        mockSqsBackend = mock(SqsClient.class);
-        when(mockS3.putObject(isA(PutObjectRequest.class), isA(RequestBody.class))).thenReturn(null);
+        this.mockS3 = mock(S3Client.class);
+        this.mockSqsBackend = mock(SqsClient.class);
+        when(this.mockS3.putObject(isA(PutObjectRequest.class), isA(RequestBody.class))).thenReturn(null);
 
         ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
-                .withLargePayloadSupportEnabled(mockS3, S3_BUCKET_NAME);
+                .withLargePayloadSupportEnabled(this.mockS3, S3_BUCKET_NAME);
 
-        extendedSqsWithDefaultConfig = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
+        this.extendedSqsWithDefaultConfig = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
     }
 
     @Test
@@ -71,7 +71,54 @@ public class ExtendedSqsClientTest {
                 .build();
         extendedSqsWithDefaultConfig.sendMessage(messageRequest);
 
-        verify(mockS3, times(1)).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
+        verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
+    }
+
+    @Test
+    public void testWhenSendSmallMessageThenS3IsNotUsed() {
+        String messageBody = generateStringWithLength(SQS_SIZE_LIMIT);
+
+        SendMessageRequest messageRequest = SendMessageRequest.builder().queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody).build();
+        extendedSqsWithDefaultConfig.sendMessage(messageRequest);
+
+        verify(mockS3, never()).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
+    }
+
+    @Test
+    public void testWhenSendMessageWithLargePayloadSupportDisabledThenS3IsNotUsedAndSqsBackendIsResponsibleToFailIt() {
+        String messageBody = generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT);
+        ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
+                .withLargePayloadSupportDisabled();
+        ExtendedSqsClient extendedSqsClient = ExtendedSqsClient.builder()
+                .withExtendedClientConfiguration(extendedClientConfiguration)
+                .withSqsClient(mockSqsBackend)
+                .build();
+
+        SendMessageRequest messageRequest = SendMessageRequest.builder()
+                .queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody)
+                .build();
+        extendedSqsClient.sendMessage(messageRequest);
+
+        verify(mockS3, never()).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
+        verify(mockSqsBackend).sendMessage(eq(messageRequest));
+    }
+
+    @Test
+    public void testWhenSendMessageWithAlwaysThroughS3AndMessageIsSmallThenItIsStillStoredInS3() {
+        String messageBody = generateStringWithLength(LESS_THAN_SQS_SIZE_LIMIT);
+        ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
+                .withLargePayloadSupportEnabled(mockS3, S3_BUCKET_NAME)
+                .withAlwaysThroughS3(true);
+        ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
+        SendMessageRequest messageRequest = SendMessageRequest.builder()
+                .queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody)
+                .build();
+        extendedSqsClient.sendMessage(messageRequest);
+
+        verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
     }
 
     @Test(expected = SdkClientException.class)
@@ -103,13 +150,13 @@ public class ExtendedSqsClientTest {
         extendedClientConfiguration.withLargePayloadSupportEnabled(s3Client, S3_BUCKET_NAME);
 
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
-                .thenThrow(SdkException.create("Ekk", new Exception()));
+                .thenThrow(SdkException.create("test", new Exception()));
 
         ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
 
         SendMessageRequest messageRequest = SendMessageRequest.builder()
                 .queueUrl(SQS_QUEUE_URL)
-                .messageBody("anything")
+                .messageBody(generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT))
                 .build();
 
         extendedSqsClient.sendMessage(messageRequest);
