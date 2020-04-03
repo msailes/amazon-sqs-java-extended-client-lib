@@ -22,6 +22,7 @@ package software.amazon.awssdk.services.sqs;
  * 
  */
 class MessageS3Pointer {
+
 	private String s3BucketName;
 	private String s3Key;
 

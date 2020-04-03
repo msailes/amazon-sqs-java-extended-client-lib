@@ -17,6 +17,7 @@ package software.amazon.awssdk.services.sqs;
 
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -26,6 +27,10 @@ import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.util.Arrays;
 
+import static com.tomasmalmsten.matchers.StringMatchesUUIDPattern.matchesThePatternOfAUUID;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.isA;
 import static org.mockito.Mockito.*;
 
@@ -108,6 +113,26 @@ public class ExtendedSqsClientTest {
                 .build();
 
         extendedSqsClient.sendMessage(messageRequest);
+    }
+
+    @Test
+    public void testThatS3PointerIsSentWhenMessageStoredInS3() throws Exception {
+        String messageBody = generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT);
+
+        SendMessageRequest messageRequest = SendMessageRequest.builder()
+                .queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody)
+                .build();
+        extendedSqsWithDefaultConfig.sendMessage(messageRequest);
+        ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
+        verify(mockSqsBackend).sendMessage(captor.capture());
+
+        String capturedMessageBody = captor.getValue().messageBody();
+        JsonDataConverter jsonDataConverter = new JsonDataConverter();
+        MessageS3Pointer messageS3Pointer = jsonDataConverter.deserializeFromJson(capturedMessageBody, MessageS3Pointer.class);
+
+        assertThat(messageS3Pointer.getS3BucketName(), equalTo(S3_BUCKET_NAME));
+        assertThat(messageS3Pointer.getS3Key(), matchesThePatternOfAUUID());
     }
 
     private String generateStringWithLength(int messageLength) {

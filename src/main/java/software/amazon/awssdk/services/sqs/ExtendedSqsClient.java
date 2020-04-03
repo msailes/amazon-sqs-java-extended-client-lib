@@ -26,6 +26,9 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
 
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.util.UUID;
 
 public class ExtendedSqsClient implements SqsClient {
@@ -33,6 +36,7 @@ public class ExtendedSqsClient implements SqsClient {
 
     private final ExtendedClientConfiguration clientConfiguration;
     private final SqsClient sqsClient;
+    private final JsonDataConverter jsonDataConverter = new JsonDataConverter();
 
     /**
      * Constructs a new Amazon SQS extended client to invoke service methods on
@@ -90,60 +94,35 @@ public class ExtendedSqsClient implements SqsClient {
             throw SdkClientException.create(errorMessage);
         }
 
-        S3Client amazonS3Client = this.clientConfiguration.getAmazonS3Client();
-        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-                .bucket(this.clientConfiguration.getS3BucketName())
-                .key(UUID.randomUUID().toString())
-                .build();
+        SendMessageRequest updatedSendMessageRequest = storeMessageInS3(sendMessageRequest);
 
-        try {
-            amazonS3Client.putObject(putObjectRequest, RequestBody.fromString(sendMessageRequest.messageBody()));
-        } catch (SdkException e){
-            String errorMessage = "Failed to store the message content in an S3 object. SQS message was not sent.";
-            LOG.error(errorMessage);
-            throw SdkClientException.create(errorMessage, e);
-        }
-
-        return this.sqsClient.sendMessage(sendMessageRequest);
+        return this.sqsClient.sendMessage(updatedSendMessageRequest);
     }
 
-
-//
-//    private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
+    private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
 //        checkMessageAttributes(sendMessageRequest.messageAttributes());
-//
-//        String s3Key = UUID.randomUUID().toString();
-//
-//        // Read the content of the message from message body
-//        String messageContentStr = sendMessageRequest.getMessageBody();
-//
-//        Long messageContentSize = getStringSizeInBytes(messageContentStr);
-//
-//        // Add a new message attribute as a flag
+
+        String s3Key = UUID.randomUUID().toString();
+        String messageContentStr = sendMessageRequest.messageBody();
+        Long messageContentSize = getStringSizeInBytes(messageContentStr);
+
+        // Add a new message attribute as a flag
 //        MessageAttributeValue messageAttributeValue = MessageAttributeValue.builder()
 //                .dataType("Number")
 //                .stringValue(messageContentSize.toString())
 //                .build();
 //        sendMessageRequest.addMessageAttributesEntry(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME,
 //                messageAttributeValue);
-//
-//        // Store the message content in S3.
-//        storeTextInS3(s3Key, messageContentStr, messageContentSize);
-//        LOG.info("S3 object created, Bucket name: " + clientConfiguration.getS3BucketName() + ", Object key: " + s3Key
-//                + ".");
-//
-//        // Convert S3 pointer (bucket name, key, etc) to JSON string
-//        MessageS3Pointer s3Pointer = new MessageS3Pointer(clientConfiguration.getS3BucketName(), s3Key);
-//
-//        String s3PointerStr = getJSONFromS3Pointer(s3Pointer);
-//
-//        // Storing S3 pointer in the message body.
-//        sendMessageRequest.setMessageBody(s3PointerStr);
-//
-//        return sendMessageRequest;
-//    }
-//
-//
+
+        storeTextInS3(s3Key, messageContentStr, messageContentSize);
+        LOG.info("S3 object created, Bucket name: " + clientConfiguration.getS3BucketName() + ", Object key: " + s3Key
+                + ".");
+
+        MessageS3Pointer s3Pointer = new MessageS3Pointer(clientConfiguration.getS3BucketName(), s3Key);
+        String s3PointerStr = getJSONFromS3Pointer(s3Pointer);
+        return sendMessageRequest.toBuilder().messageBody(s3PointerStr).build();
+    }
+
 //    private void checkMessageAttributes(Map<String, MessageAttributeValue> messageAttributes) {
 //        int msgAttributesSize = getMsgAttributesSize(messageAttributes);
 //        if (msgAttributesSize > clientConfiguration.getMessageSizeThreshold()) {
@@ -194,51 +173,53 @@ public class ExtendedSqsClient implements SqsClient {
 //        }
 //        return totalMsgAttributesSize;
 //    }
-//
-//    private String getJSONFromS3Pointer(MessageS3Pointer s3Pointer) {
-//        String s3PointerStr = null;
-//        try {
-//            JsonDataConverter jsonDataConverter = new JsonDataConverter();
-//            s3PointerStr = jsonDataConverter.serializeToJson(s3Pointer);
-//        } catch (Exception e) {
-//            String errorMessage = "Failed to convert S3 object pointer to text. Message was not sent.";
-//            LOG.error(errorMessage, e);
-//            throw new AmazonClientException(errorMessage, e);
-//        }
-//        return s3PointerStr;
-//    }
-//
-//    private void storeTextInS3(String s3Key, String messageContentStr, Long messageContentSize) {
-//        InputStream messageContentStream = new ByteArrayInputStream(messageContentStr.getBytes(StandardCharsets.UTF_8));
-//        ObjectMetadata messageContentStreamMetadata = new ObjectMetadata();
-//        messageContentStreamMetadata.setContentLength(messageContentSize);
-//        PutObjectRequest putObjectRequest = new PutObjectRequest(clientConfiguration.getS3BucketName(), s3Key,
-//                messageContentStream, messageContentStreamMetadata);
-//        try {
-//            clientConfiguration.getAmazonS3Client().putObject(putObjectRequest);
-//        } catch (AmazonServiceException e) {
-//            String errorMessage = "Failed to store the message content in an S3 object. SQS message was not sent.";
-//            LOG.error(errorMessage, e);
-//            throw new AmazonServiceException(errorMessage, e);
-//        } catch (AmazonClientException e) {
-//            String errorMessage = "Failed to store the message content in an S3 object. SQS message was not sent.";
-//            LOG.error(errorMessage, e);
-//            throw new AmazonClientException(errorMessage, e);
-//        }
-//    }
-//
-//    private static long getStringSizeInBytes(String str) {
-//        CountingOutputStream counterOutputStream = new CountingOutputStream();
-//        try {
-//            Writer writer = new OutputStreamWriter(counterOutputStream, "UTF-8");
-//            writer.write(str);
-//            writer.flush();
-//            writer.close();
-//        } catch (IOException e) {
-//            String errorMessage = "Failed to calculate the size of message payload.";
-//            LOG.error(errorMessage, e);
-//            throw new AmazonClientException(errorMessage, e);
-//        }
-//        return counterOutputStream.getTotalSize();
-//    }
+
+    private String getJSONFromS3Pointer(MessageS3Pointer s3Pointer) {
+        String s3PointerStr = null;
+        try {
+            s3PointerStr = jsonDataConverter.serializeToJson(s3Pointer);
+        } catch (Exception e) {
+            String errorMessage = "Failed to convert S3 object pointer to text. Message was not sent.";
+            LOG.error(errorMessage, e);
+            throw SdkClientException.create(errorMessage, e);
+        }
+        return s3PointerStr;
+    }
+
+    private void storeTextInS3(String s3Key, String messageContentStr, Long messageContentSize) {
+
+        // @TODO Not sure if this is needed
+        //        InputStream messageContentStream = new ByteArrayInputStream(messageContentStr.getBytes(StandardCharsets.UTF_8));
+        //        ObjectMetadata messageContentStreamMetadata = new ObjectMetadata();
+        //        messageContentStreamMetadata.setContentLength(messageContentSize);
+        //        PutObjectRequest putObjectRequest = new PutObjectRequest(clientConfiguration.getS3BucketName(), s3Key,
+        //                messageContentStream, messageContentStreamMetadata);
+        S3Client amazonS3Client = this.clientConfiguration.getAmazonS3Client();
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(s3Key)
+                .key(UUID.randomUUID().toString())
+                .build();
+        try {
+            amazonS3Client.putObject(putObjectRequest, RequestBody.fromString(messageContentStr));
+        } catch (SdkException e){
+            String errorMessage = "Failed to store the message content in an S3 object. SQS message was not sent.";
+            LOG.error(errorMessage);
+            throw SdkClientException.create(errorMessage, e);
+        }
+    }
+
+    private static long getStringSizeInBytes(String str) {
+        CountingOutputStream counterOutputStream = new CountingOutputStream();
+        try {
+            Writer writer = new OutputStreamWriter(counterOutputStream, "UTF-8");
+            writer.write(str);
+            writer.flush();
+            writer.close();
+        } catch (IOException e) {
+            String errorMessage = "Failed to calculate the size of message payload.";
+            LOG.error(errorMessage, e);
+            throw SdkClientException.create(errorMessage, e);
+        }
+        return counterOutputStream.getTotalSize();
+    }
 }
