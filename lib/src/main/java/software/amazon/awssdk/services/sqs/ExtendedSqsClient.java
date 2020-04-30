@@ -18,22 +18,33 @@ package software.amazon.awssdk.services.sqs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.sqs.model.InvalidMessageContentsException;
+import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
 import software.amazon.awssdk.services.sqs.model.SqsException;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -73,11 +84,9 @@ public class ExtendedSqsClient implements SqsClient {
      * All service calls made using this new client object are blocking, and
      * will not return until the service call completes.
      *
-     * @param sqsClient
-     *            The Amazon SQS client to use to connect to Amazon SQS.
-     * @param extendedClientConfig
-     *            The extended client configuration options controlling the
-     *            functionality of this client.
+     * @param sqsClient            The Amazon SQS client to use to connect to Amazon SQS.
+     * @param extendedClientConfig The extended client configuration options controlling the
+     *                             functionality of this client.
      */
     protected ExtendedSqsClient(SqsClient sqsClient, ExtendedClientConfiguration extendedClientConfig) {
         this.sqsClient = sqsClient;
@@ -126,20 +135,15 @@ public class ExtendedSqsClient implements SqsClient {
      *
      * @param sendMessageRequest
      * @return Result of the SendMessage operation returned by the service.
-     * @throws InvalidMessageContentsException
-     *         The message contains characters outside the allowed set.
-     * @throws UnsupportedOperationException
-     *         Error code 400. Unsupported operation.
-     * @throws SdkException
-     *         Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
-     *         catch all scenarios.
-     * @throws SdkClientException
-     *         If any client side error occurs such as an IO related failure, failure to get credentials, etc.
-     * @throws SqsException
-     *         Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
+     * @throws InvalidMessageContentsException The message contains characters outside the allowed set.
+     * @throws UnsupportedOperationException   Error code 400. Unsupported operation.
+     * @throws SdkException                    Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
+     *                                         catch all scenarios.
+     * @throws SdkClientException              If any client side error occurs such as an IO related failure, failure to get credentials, etc.
+     * @throws SqsException                    Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
      * @sample SqsClient.SendMessage
      * @see <a href="http://docs.aws.amazon.com/goto/WebAPI/sqs-2012-11-05/SendMessage" target="_top">AWS API
-     *      Documentation</a>
+     * Documentation</a>
      */
     @Override
     public SendMessageResponse sendMessage(SendMessageRequest sendMessageRequest) throws AwsServiceException, SdkClientException {
@@ -188,42 +192,96 @@ public class ExtendedSqsClient implements SqsClient {
      * create one manually via {@link SendMessageRequest#builder()}
      * </p>
      *
-     * @param sendMessageRequest
-     *        A {@link Consumer} that will call methods on {@link SendMessageRequest.Builder} to create a request.
+     * @param sendMessageRequest A {@link Consumer} that will call methods on {@link SendMessageRequest.Builder} to create a request.
      * @return Result of the SendMessage operation returned by the service.
-     * @throws InvalidMessageContentsException
-     *         The message contains characters outside the allowed set.
-     * @throws UnsupportedOperationException
-     *         Error code 400. Unsupported operation.
-     * @throws SdkException
-     *         Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
-     *         catch all scenarios.
-     * @throws SdkClientException
-     *         If any client side error occurs such as an IO related failure, failure to get credentials, etc.
-     * @throws SqsException
-     *         Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
+     * @throws InvalidMessageContentsException The message contains characters outside the allowed set.
+     * @throws UnsupportedOperationException   Error code 400. Unsupported operation.
+     * @throws SdkException                    Base class for all exceptions that can be thrown by the SDK (both service and client). Can be used for
+     *                                         catch all scenarios.
+     * @throws SdkClientException              If any client side error occurs such as an IO related failure, failure to get credentials, etc.
+     * @throws SqsException                    Base class for all service exceptions. Unknown exceptions will be thrown as an instance of this type.
      * @sample SqsClient.SendMessage
      * @see <a href="http://docs.aws.amazon.com/goto/WebAPI/sqs-2012-11-05/SendMessage" target="_top">AWS API
-     *      Documentation</a>
+     * Documentation</a>
      */
     public SendMessageResponse sendMessage(Consumer<SendMessageRequest.Builder> sendMessageRequest) throws AwsServiceException, SdkClientException {
         return sendMessage(SendMessageRequest.builder().applyMutation(sendMessageRequest).build());
     }
 
+    public ReceiveMessageResponse receiveMessage(ReceiveMessageRequest receiveMessageRequest) throws AwsServiceException, SdkClientException {
+        if (receiveMessageRequest == null) {
+            String errorMessage = "receiveMessageRequest cannot be null.";
+            LOG.error(errorMessage);
+            throw SdkClientException.create(errorMessage);
+        }
+
+        if (!clientConfiguration.isLargePayloadSupportEnabled()) {
+            return this.sqsClient.receiveMessage(receiveMessageRequest);
+        }
+
+        ReceiveMessageRequest.Builder builder = receiveMessageRequest.toBuilder();
+        if (!receiveMessageRequest.messageAttributeNames().contains(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME)) {
+            ArrayList<String> messageAttributeNames = new ArrayList<>(receiveMessageRequest.messageAttributeNames());
+            messageAttributeNames.add(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME);
+            builder.messageAttributeNames(messageAttributeNames);
+        }
+
+        ReceiveMessageResponse receiveMessageResponse = this.sqsClient.receiveMessage(builder.build());
+        ReceiveMessageResponse.Builder responseBuilder = receiveMessageResponse.toBuilder();
+
+        List<Message> messages = receiveMessageResponse.messages();
+        List<Message> alteredMessages = new ArrayList<>();
+
+        for (Message message : messages) {
+
+            // for each received message check if they are stored in S3.
+            MessageAttributeValue largePayloadAttributeValue = message.messageAttributes().get(
+                    SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME);
+            if (largePayloadAttributeValue != null) {
+                String messageBody = message.body();
+                MessageS3Pointer s3Pointer = readMessageS3PointerFromJSON(messageBody);
+                String s3MsgBucketName = s3Pointer.getS3BucketName();
+                String s3MsgKey = s3Pointer.getS3Key();
+
+                String origMsgBody = getTextFromS3(s3MsgBucketName, s3MsgKey);
+                LOG.info("S3 object read, Bucket name: " + s3MsgBucketName + ", Object key: " + s3MsgKey + ".");
+
+                Message.Builder messageBuilder = message.toBuilder();
+                messageBuilder.body(origMsgBody);
+
+                // remove the additional attribute before returning the message
+                // to user.
+                HashMap<String, MessageAttributeValue> stringMessageAttributeValueHashMap = new HashMap<>(message.messageAttributes());
+                stringMessageAttributeValueHashMap.remove(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME);
+                messageBuilder.messageAttributes(stringMessageAttributeValueHashMap);
+
+                // Embed s3 object pointer in the receipt handle.
+                String modifiedReceiptHandle = embedS3PointerInReceiptHandle(message.receiptHandle(),
+                        s3MsgBucketName, s3MsgKey);
+
+                messageBuilder.receiptHandle(modifiedReceiptHandle);
+                alteredMessages.add(messageBuilder.build());
+            } else {
+                alteredMessages.add(message);
+            }
+        }
+        return responseBuilder.build();
+    }
+
     private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
+        SendMessageRequest.Builder builder = sendMessageRequest.toBuilder();
 //        checkMessageAttributes(sendMessageRequest.messageAttributes());
 
         String s3Key = UUID.randomUUID().toString();
         String messageContentStr = sendMessageRequest.messageBody();
         Long messageContentSize = getStringSizeInBytes(messageContentStr);
 
-        // Add a new message attribute as a flag
-//        MessageAttributeValue messageAttributeValue = MessageAttributeValue.builder()
-//                .dataType("Number")
-//                .stringValue(messageContentSize.toString())
-//                .build();
-//        sendMessageRequest.addMessageAttributesEntry(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME,
-//                messageAttributeValue);
+        MessageAttributeValue messageAttributeValue = MessageAttributeValue.builder()
+                .dataType("Number")
+                .stringValue(messageContentSize.toString())
+                .build();
+        Map<String, MessageAttributeValue> messageAttributes = new HashMap<>(sendMessageRequest.messageAttributes());
+        messageAttributes.put(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME, messageAttributeValue);
 
         storeTextInS3(s3Key, messageContentStr, messageContentSize);
         LOG.info("S3 object created, Bucket name: " + clientConfiguration.getS3BucketName() + ", Object key: " + s3Key
@@ -231,7 +289,9 @@ public class ExtendedSqsClient implements SqsClient {
 
         MessageS3Pointer s3Pointer = new MessageS3Pointer(clientConfiguration.getS3BucketName(), s3Key);
         String s3PointerStr = getJSONFromS3Pointer(s3Pointer);
-        return sendMessageRequest.toBuilder().messageBody(s3PointerStr).build();
+        return builder.messageBody(s3PointerStr)
+                .messageAttributes(messageAttributes)
+                .build();
     }
 
 //    private void checkMessageAttributes(Map<String, MessageAttributeValue> messageAttributes) {
@@ -261,6 +321,52 @@ public class ExtendedSqsClient implements SqsClient {
 //            throw new AmazonClientException(errorMessage);
 //        }
 //    }
+
+    private String embedS3PointerInReceiptHandle(String receiptHandle, String s3MsgBucketName, String s3MsgKey) {
+        String modifiedReceiptHandle = SQSExtendedClientConstants.S3_BUCKET_NAME_MARKER + s3MsgBucketName
+                + SQSExtendedClientConstants.S3_BUCKET_NAME_MARKER + SQSExtendedClientConstants.S3_KEY_MARKER
+                + s3MsgKey + SQSExtendedClientConstants.S3_KEY_MARKER + receiptHandle;
+        return modifiedReceiptHandle;
+    }
+
+    private MessageS3Pointer readMessageS3PointerFromJSON(String messageBody) {
+        MessageS3Pointer s3Pointer = null;
+        try {
+            JsonDataConverter jsonDataConverter = new JsonDataConverter();
+            s3Pointer = jsonDataConverter.deserializeFromJson(messageBody, MessageS3Pointer.class);
+        } catch (Exception e) {
+            String errorMessage = "Failed to read the S3 object pointer from an SQS message. Message was not received.";
+            LOG.error(errorMessage, e);
+            throw SdkClientException.create(errorMessage, e);
+        }
+        return s3Pointer;
+    }
+
+    private String getTextFromS3(String s3BucketName, String s3Key) {
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(s3BucketName)
+                .key(s3Key)
+                .build();
+        String embeddedText = null;
+        ResponseBytes<GetObjectResponse> object = null;
+        try {
+            object = clientConfiguration.getAmazonS3Client().getObject(getObjectRequest, ResponseTransformer.toBytes());
+        } catch (SdkException e) {
+            String errorMessage = "Failed to get the S3 object which contains the message payload. Message was not received.";
+            LOG.error(errorMessage, e);
+            throw SdkException.create(errorMessage, e);
+        }
+
+        try {
+            embeddedText = object.asUtf8String();
+        } catch (UncheckedIOException e) {
+            String errorMessage = "Failure when handling the message which was read from S3 object. Message was not received.";
+            LOG.error(errorMessage, e);
+            throw SdkClientException.create(errorMessage, e);
+        }
+
+        return embeddedText;
+    }
 
     private boolean isLarge(SendMessageRequest sendMessageRequest) {
         int msgAttributesSize = getMsgAttributesSize(sendMessageRequest.messageAttributes());
@@ -305,7 +411,6 @@ public class ExtendedSqsClient implements SqsClient {
     }
 
     private void storeTextInS3(String s3Key, String messageContentStr, Long messageContentSize) {
-
         // @TODO Not sure if this is needed
         //        InputStream messageContentStream = new ByteArrayInputStream(messageContentStr.getBytes(StandardCharsets.UTF_8));
         //        ObjectMetadata messageContentStreamMetadata = new ObjectMetadata();
@@ -314,12 +419,12 @@ public class ExtendedSqsClient implements SqsClient {
         //                messageContentStream, messageContentStreamMetadata);
         S3Client amazonS3Client = this.clientConfiguration.getAmazonS3Client();
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-                .bucket(s3Key)
-                .key(UUID.randomUUID().toString())
+                .bucket(this.clientConfiguration.getS3BucketName())
+                .key(s3Key)
                 .build();
         try {
             amazonS3Client.putObject(putObjectRequest, RequestBody.fromString(messageContentStr));
-        } catch (SdkException e){
+        } catch (SdkException e) {
             String errorMessage = "Failed to store the message content in an S3 object. SQS message was not sent.";
             LOG.error(errorMessage);
             throw SdkClientException.create(errorMessage, e);

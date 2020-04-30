@@ -63,12 +63,7 @@ public class ExtendedSqsClientTest {
 
     @Test
     public void testWhenSendLargeMessageThenPayloadIsStoredInS3() {
-        String messageBody = generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT);
-
-        SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(SQS_QUEUE_URL)
-                .messageBody(messageBody)
-                .build();
+        SendMessageRequest messageRequest = getSendMessageRequest(MORE_THAN_SQS_SIZE_LIMIT);
         extendedSqsWithDefaultConfig.sendMessage(messageRequest);
 
         verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
@@ -76,10 +71,7 @@ public class ExtendedSqsClientTest {
 
     @Test
     public void testWhenSendSmallMessageThenS3IsNotUsed() {
-        String messageBody = generateStringWithLength(SQS_SIZE_LIMIT);
-
-        SendMessageRequest messageRequest = SendMessageRequest.builder().queueUrl(SQS_QUEUE_URL)
-                .messageBody(messageBody).build();
+        SendMessageRequest messageRequest = getSendMessageRequest(SQS_SIZE_LIMIT);
         extendedSqsWithDefaultConfig.sendMessage(messageRequest);
 
         verify(mockS3, never()).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
@@ -107,35 +99,24 @@ public class ExtendedSqsClientTest {
 
     @Test
     public void testWhenSendMessageWithAlwaysThroughS3AndMessageIsSmallThenItIsStillStoredInS3() {
-        String messageBody = generateStringWithLength(LESS_THAN_SQS_SIZE_LIMIT);
         ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
                 .withLargePayloadSupportEnabled(mockS3, S3_BUCKET_NAME)
                 .withAlwaysThroughS3(true);
         ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
-        SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(SQS_QUEUE_URL)
-                .messageBody(messageBody)
-                .build();
-        extendedSqsClient.sendMessage(messageRequest);
+        extendedSqsClient.sendMessage(getSendMessageRequest(LESS_THAN_SQS_SIZE_LIMIT));
 
         verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
     }
 
     @Test
     public void testWhenSendMessageWithSetMessageSizeThresholdThenThresholdIsHonored() {
-        int messageLength = ARBITRATY_SMALLER_THRESSHOLD * 2;
-        String messageBody = generateStringWithLength(messageLength);
         ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration()
                 .withLargePayloadSupportEnabled(mockS3, S3_BUCKET_NAME)
                 .withMessageSizeThreshold(ARBITRATY_SMALLER_THRESSHOLD);
 
         ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
 
-        SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(SQS_QUEUE_URL)
-                .messageBody(messageBody)
-                .build();
-        extendedSqsClient.sendMessage(messageRequest);
+        extendedSqsClient.sendMessage(getSendMessageRequest(ARBITRATY_SMALLER_THRESSHOLD * 2));
         verify(mockS3).putObject(isA(PutObjectRequest.class), isA(RequestBody.class));
     }
 
@@ -172,22 +153,12 @@ public class ExtendedSqsClientTest {
 
         ExtendedSqsClient extendedSqsClient = new ExtendedSqsClient(mockSqsBackend, extendedClientConfiguration);
 
-        SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(SQS_QUEUE_URL)
-                .messageBody(generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT))
-                .build();
-
-        extendedSqsClient.sendMessage(messageRequest);
+        extendedSqsClient.sendMessage(getSendMessageRequest(MORE_THAN_SQS_SIZE_LIMIT));
     }
 
     @Test
     public void testThatS3PointerIsSentWhenMessageStoredInS3() throws Exception {
-        String messageBody = generateStringWithLength(MORE_THAN_SQS_SIZE_LIMIT);
-
-        SendMessageRequest messageRequest = SendMessageRequest.builder()
-                .queueUrl(SQS_QUEUE_URL)
-                .messageBody(messageBody)
-                .build();
+        SendMessageRequest messageRequest = getSendMessageRequest(MORE_THAN_SQS_SIZE_LIMIT);
         extendedSqsWithDefaultConfig.sendMessage(messageRequest);
         ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
         verify(mockSqsBackend).sendMessage(captor.capture());
@@ -198,6 +169,26 @@ public class ExtendedSqsClientTest {
 
         assertThat(messageS3Pointer.getS3BucketName(), equalTo(S3_BUCKET_NAME));
         assertThat(messageS3Pointer.getS3Key(), matchesThePatternOfAUUID());
+    }
+
+//    @Test
+//    public void testThatSQSLargePayloadSizeContainsANonEmptyAttributeType() {
+//        this.extendedSqsWithDefaultConfig.sendMessage(getSendMessageRequest(MORE_THAN_SQS_SIZE_LIMIT));
+//
+//        ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
+//        verify(mockSqsBackend).sendMessage(captor.capture());
+//
+//        MessageSystemAttributeValue capturedMessageBody = captor.getValue().messageSystemAttributes().get(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME);
+//        assertTrue(capturedMessageBody.stringValue().equals("tennis"));
+//    }
+
+    private SendMessageRequest getSendMessageRequest(int length) {
+        String messageBody = generateStringWithLength(length);
+
+        return SendMessageRequest.builder()
+                .queueUrl(SQS_QUEUE_URL)
+                .messageBody(messageBody)
+                .build();
     }
 
     private String generateStringWithLength(int messageLength) {
