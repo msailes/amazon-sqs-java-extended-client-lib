@@ -16,13 +16,17 @@ package software.amazon.awssdk.services.sqs;/*
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.CreateQueueResponse;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 public class ExampleApplication {
@@ -30,7 +34,14 @@ public class ExampleApplication {
     private static final int SQS_SIZE_LIMIT = 262144;
     private static final int MORE_THAN_SQS_SIZE_LIMIT = SQS_SIZE_LIMIT + 1;
 
+    public static final int NUMBER_OF_MESSAGES = 10;
+
     public static void main(String[] args) {
+        ExampleApplication exampleApplication = new ExampleApplication();
+        exampleApplication.run();
+    }
+
+    private void run() {
         SqsClient sqsClient = SqsClient.create();
         S3Client s3Client = S3Client.create();
         String queueName = UUID.randomUUID().toString();
@@ -48,9 +59,8 @@ public class ExampleApplication {
         System.out.println(queueUrl);
 
         int sizeOfMessageToSend = MORE_THAN_SQS_SIZE_LIMIT;
-        int numberOfMessagesToSend = 10;
 
-        for (int i = 0; i < numberOfMessagesToSend; i++) {
+        for (int i = 0; i < NUMBER_OF_MESSAGES; i++) {
             SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(generateStringWithLength(sizeOfMessageToSend))
@@ -61,14 +71,35 @@ public class ExampleApplication {
             sizeOfMessageToSend++;
         }
 
-        ReceiveMessageResponse receiveMessageResponse = extendedSqsClient.receiveMessage(ReceiveMessageRequest.builder()
-                .queueUrl(queueUrl)
-                .maxNumberOfMessages(numberOfMessagesToSend)
-                .build());
+        int numberOfMessagesRecieved = 0;
 
-        for (Message message : receiveMessageResponse.messages()) {
-            System.out.println(message.body());
-        }
+        do {
+            ReceiveMessageResponse receiveMessageResponse = extendedSqsClient.receiveMessage(ReceiveMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .maxNumberOfMessages(10)
+                    .waitTimeSeconds(10)
+                    .build());
+
+            List<DeleteMessageBatchRequestEntry> receiptList = new ArrayList<>();
+
+            for (Message message : receiveMessageResponse.messages()) {
+                System.out.println(message.body());
+                DeleteMessageBatchRequestEntry deleteRequest = DeleteMessageBatchRequestEntry.builder()
+                        .id(UUID.randomUUID().toString())
+                        .receiptHandle(message.receiptHandle())
+                        .build();
+                receiptList.add(deleteRequest);
+                numberOfMessagesRecieved++;
+                System.out.println("Number of messages recieved: " + numberOfMessagesRecieved);
+            }
+
+            DeleteMessageBatchRequest deleteMessageBatchRequest = DeleteMessageBatchRequest.builder()
+                    .entries(receiptList)
+                    .queueUrl(queueUrl)
+                    .build();
+            sqsClient.deleteMessageBatch(deleteMessageBatchRequest);
+
+        } while (numberOfMessagesRecieved < NUMBER_OF_MESSAGES );
 
         sqsClient.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
     }
