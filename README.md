@@ -9,7 +9,8 @@ Amazon SQS Extended Client Library for Java
 
 - [x] sendMessage(SendMessageRequest sendMessageRequest)
 - [x] sendMessage(Consumer<SendMessageRequest.Builder> sendMessageRequest)
-- [ ] receiveMessage(ReceiveMessageRequest receiveMessageRequest)
+- [x] receiveMessage(ReceiveMessageRequest receiveMessageRequest)
+- [ ] deleteMessage(DeleteMessageRequest deleteMessageRequest)
 - [ ] the rest
 
 ### Usage

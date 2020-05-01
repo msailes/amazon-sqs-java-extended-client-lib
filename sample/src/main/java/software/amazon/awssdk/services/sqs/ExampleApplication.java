@@ -13,7 +13,6 @@ package software.amazon.awssdk.services.sqs;/*
  * permissions and limitations under the License.
  */
 
-import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.CreateQueueResponse;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequest;
@@ -42,18 +41,11 @@ public class ExampleApplication {
     }
 
     private void run() {
-        SqsClient sqsClient = SqsClient.create();
-        S3Client s3Client = S3Client.create();
+        ExtendedSqsClient extendedSqsClient = ExtendedSqsClient.defaultClient("ms-extended-sqs-client");
+
         String queueName = UUID.randomUUID().toString();
         System.out.println(queueName);
-
-        ExtendedClientConfiguration extendedClientConfiguration = new ExtendedClientConfiguration();
-        extendedClientConfiguration.withLargePayloadSupportEnabled(s3Client,"ms-extended-sqs-client");
-
-        ExtendedSqsClient extendedSqsClient = new ExtendedSqsClientBuilder().withExtendedClientConfiguration(extendedClientConfiguration)
-                .withSqsClient(sqsClient)
-                .build();
-        CreateQueueResponse createQueueResponse = sqsClient.createQueue(CreateQueueRequest.builder()
+        CreateQueueResponse createQueueResponse = extendedSqsClient.createQueue(CreateQueueRequest.builder()
                 .queueName(queueName).build());
         String queueUrl = createQueueResponse.queueUrl();
         System.out.println(queueUrl);
@@ -83,7 +75,7 @@ public class ExampleApplication {
             List<DeleteMessageBatchRequestEntry> receiptList = new ArrayList<>();
 
             for (Message message : receiveMessageResponse.messages()) {
-                System.out.println(message.body());
+                System.out.println(message.body().substring(0, 5) + "...");
                 DeleteMessageBatchRequestEntry deleteRequest = DeleteMessageBatchRequestEntry.builder()
                         .id(UUID.randomUUID().toString())
                         .receiptHandle(message.receiptHandle())
@@ -97,11 +89,11 @@ public class ExampleApplication {
                     .entries(receiptList)
                     .queueUrl(queueUrl)
                     .build();
-            sqsClient.deleteMessageBatch(deleteMessageBatchRequest);
+            extendedSqsClient.deleteMessageBatch(deleteMessageBatchRequest);
 
         } while (numberOfMessagesRecieved < NUMBER_OF_MESSAGES );
 
-        sqsClient.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
+        extendedSqsClient.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
     }
 
     private static String generateStringWithLength(int messageLength) {
