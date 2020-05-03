@@ -25,6 +25,7 @@ import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -39,6 +40,7 @@ import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityResponse
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.CreateQueueResponse;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchResponse;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageResponse;
@@ -868,7 +870,29 @@ public class ExtendedSqsClient implements SqsClient {
      */
     public DeleteMessageResponse deleteMessage(DeleteMessageRequest deleteMessageRequest) throws InvalidIdFormatException,
             ReceiptHandleIsInvalidException, AwsServiceException, SdkClientException, SqsException {
-        return this.sqsClient.deleteMessage(deleteMessageRequest);
+
+        if (deleteMessageRequest == null) {
+            String errorMessage = "deleteMessageRequest cannot be null.";
+            LOG.error(errorMessage);
+            throw SdkClientException.create(errorMessage);
+        }
+
+        if (!clientConfiguration.isLargePayloadSupportEnabled()) {
+            return this.sqsClient.deleteMessage(deleteMessageRequest);
+        }
+
+        String receiptHandle = deleteMessageRequest.receiptHandle();
+        String origReceiptHandle = receiptHandle;
+        if (isS3ReceiptHandle(receiptHandle)) {
+            deleteMessagePayloadFromS3(receiptHandle);
+            origReceiptHandle = getOrigReceiptHandle(receiptHandle);
+        }
+
+        DeleteMessageRequest updatedDeleteRequest = deleteMessageRequest.toBuilder()
+                .receiptHandle(origReceiptHandle)
+                .build();
+
+        return this.sqsClient.deleteMessage(updatedDeleteRequest);
     }
 
     /**
@@ -971,7 +995,32 @@ public class ExtendedSqsClient implements SqsClient {
     public DeleteMessageBatchResponse deleteMessageBatch(DeleteMessageBatchRequest deleteMessageBatchRequest)
             throws TooManyEntriesInBatchRequestException, EmptyBatchRequestException, BatchEntryIdsNotDistinctException,
             InvalidBatchEntryIdException, AwsServiceException, SdkClientException, SqsException {
-        return this.sqsClient.deleteMessageBatch(deleteMessageBatchRequest);
+
+        if (deleteMessageBatchRequest == null) {
+            String errorMessage = "deleteMessageBatchRequest cannot be null.";
+            LOG.error(errorMessage);
+            throw SdkClientException.create(errorMessage);
+        }
+
+        if (!clientConfiguration.isLargePayloadSupportEnabled()) {
+            return this.sqsClient.deleteMessageBatch(deleteMessageBatchRequest);
+        }
+
+        List<DeleteMessageBatchRequestEntry> updatedEntries = new ArrayList<>();
+        for (DeleteMessageBatchRequestEntry entry : deleteMessageBatchRequest.entries()) {
+            String receiptHandle = entry.receiptHandle();
+            String origReceiptHandle = receiptHandle;
+            if (isS3ReceiptHandle(receiptHandle)) {
+                deleteMessagePayloadFromS3(receiptHandle);
+                origReceiptHandle = getOrigReceiptHandle(receiptHandle);
+            }
+            entry.toBuilder().receiptHandle(origReceiptHandle);
+            updatedEntries.add(entry);
+        }
+
+        DeleteMessageBatchRequest updatedRequest = deleteMessageBatchRequest.toBuilder().entries(updatedEntries).build();
+
+        return this.sqsClient.deleteMessageBatch(updatedRequest);
     }
 
     /**
@@ -2543,6 +2592,23 @@ public class ExtendedSqsClient implements SqsClient {
         return this.sqsClient.untagQueue(untagQueueRequest);
     }
 
+    private void deleteMessagePayloadFromS3(String receiptHandle) {
+        String s3MsgBucketName = getFromReceiptHandleByMarker(receiptHandle, SQSExtendedClientConstants.S3_BUCKET_NAME_MARKER);
+        String s3MsgKey = getFromReceiptHandleByMarker(receiptHandle, SQSExtendedClientConstants.S3_KEY_MARKER);
+        try {
+            DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder().bucket(s3MsgBucketName)
+                    .key(s3MsgKey)
+                    .build();
+            clientConfiguration.getAmazonS3Client().deleteObject(deleteObjectRequest);
+        } catch (SdkException e) {
+            String errorMessage = "Failed to delete the S3 object which contains the SQS message payload. SQS message was not deleted.";
+            LOG.error(errorMessage, e);
+            throw SdkException.create(errorMessage, e);
+        }
+
+        LOG.info("S3 object deleted, Bucket name: " + s3MsgBucketName + ", Object key: " + s3MsgKey + ".");
+    }
+
     private SendMessageRequest storeMessageInS3(SendMessageRequest sendMessageRequest) {
         SendMessageRequest.Builder builder = sendMessageRequest.toBuilder();
 //        checkMessageAttributes(sendMessageRequest.messageAttributes());
@@ -2558,9 +2624,8 @@ public class ExtendedSqsClient implements SqsClient {
         Map<String, MessageAttributeValue> messageAttributes = new HashMap<>(sendMessageRequest.messageAttributes());
         messageAttributes.put(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME, messageAttributeValue);
 
-        storeTextInS3(s3Key, messageContentStr, messageContentSize);
-        LOG.info("S3 object created, Bucket name: " + clientConfiguration.getS3BucketName() + ", Object key: " + s3Key
-                + ".");
+        storeTextInS3(s3Key, messageContentStr);
+        LOG.info("S3 object created, Bucket name: " + clientConfiguration.getS3BucketName() + ", Object key: " + s3Key + ".");
 
         MessageS3Pointer s3Pointer = new MessageS3Pointer(clientConfiguration.getS3BucketName(), s3Key);
         String s3PointerStr = getJSONFromS3Pointer(s3Pointer);
@@ -2615,6 +2680,23 @@ public class ExtendedSqsClient implements SqsClient {
             throw SdkClientException.create(errorMessage, e);
         }
         return s3Pointer;
+    }
+
+    private String getOrigReceiptHandle(String receiptHandle) {
+        int secondOccurence = receiptHandle.indexOf(SQSExtendedClientConstants.S3_KEY_MARKER,
+                receiptHandle.indexOf(SQSExtendedClientConstants.S3_KEY_MARKER) + 1);
+        return receiptHandle.substring(secondOccurence + SQSExtendedClientConstants.S3_KEY_MARKER.length());
+    }
+
+    private String getFromReceiptHandleByMarker(String receiptHandle, String marker) {
+        int firstOccurence = receiptHandle.indexOf(marker);
+        int secondOccurence = receiptHandle.indexOf(marker, firstOccurence + 1);
+        return receiptHandle.substring(firstOccurence + marker.length(), secondOccurence);
+    }
+
+    private boolean isS3ReceiptHandle(String receiptHandle) {
+        return receiptHandle.contains(SQSExtendedClientConstants.S3_BUCKET_NAME_MARKER)
+                && receiptHandle.contains(SQSExtendedClientConstants.S3_KEY_MARKER);
     }
 
     private String getTextFromS3(String s3BucketName, String s3Key) {
@@ -2685,13 +2767,7 @@ public class ExtendedSqsClient implements SqsClient {
         return s3PointerStr;
     }
 
-    private void storeTextInS3(String s3Key, String messageContentStr, Long messageContentSize) {
-        // @TODO Not sure if this is needed
-        //        InputStream messageContentStream = new ByteArrayInputStream(messageContentStr.getBytes(StandardCharsets.UTF_8));
-        //        ObjectMetadata messageContentStreamMetadata = new ObjectMetadata();
-        //        messageContentStreamMetadata.setContentLength(messageContentSize);
-        //        PutObjectRequest putObjectRequest = new PutObjectRequest(clientConfiguration.getS3BucketName(), s3Key,
-        //                messageContentStream, messageContentStreamMetadata);
+    private void storeTextInS3(String s3Key, String messageContentStr) {
         S3Client amazonS3Client = this.clientConfiguration.getAmazonS3Client();
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(this.clientConfiguration.getS3BucketName())

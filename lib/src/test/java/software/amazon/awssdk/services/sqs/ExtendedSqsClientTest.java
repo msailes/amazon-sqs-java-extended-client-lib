@@ -22,11 +22,17 @@ import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import java.util.Arrays;
+import java.util.Collections;
 
+import static org.hamcrest.CoreMatchers.is;
 import static software.amazon.awssdk.services.sqs.matchers.StringMatchesUUIDPattern.matchesThePatternOfAUUID;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -41,6 +47,8 @@ public class ExtendedSqsClientTest {
     private S3Client mockS3;
     private static final String S3_BUCKET_NAME = "test-bucket-name";
     private static final String SQS_QUEUE_URL = "test-queue-url";
+    private static final String S3_KEY = "2ede0e0f-50cc-4464-800e-72d6497ec063";
+    public static final String RECEIPT_HANDLE = "-..s3BucketName..-" + S3_BUCKET_NAME + "-..s3BucketName..--..s3Key..-" + S3_KEY + "-..s3Key..-AQEBzDYhwQBHp+NIlvgL6WFKHNtoVpeCCQjmLep47yPr5dM5TmD1GWbneikO57LJAnL1iZ8THzk1H4r8k4XqrkQzsrOC0CcuY4AZisjhKyxNAQ9WT3A2c5y4WcX1OaL1W7XK8rtVHmHrJ8WoL793QQ2V4CetnPgYltNlp8vukHaiIULiLT/FOKybxCB3YicGngH2AWtk5PTBwUZNf+DTPJoEOyTgA7aYi89N3uaon97sJz7WH8w6LqOGoRCM4sMjn19A96PAP/UqsdxQ5us9P0hNMSFHB2BTr78N1m+jwWQLnt4gp7nKZ0t+PUYRuaAUZuMpPLTD6RTkPXQuxCPlhkesVILyDwOAwHHQwLKVoxdFkiBiIf2KGB2tHA7nc0n91IJAqymt6Ipi34IaKp/D1IXlFWXY+xVPQ43r1ZNHL/DqO40=";
 
     private static final int LESS_THAN_SQS_SIZE_LIMIT = 3;
     private static final int SQS_SIZE_LIMIT = 262144;
@@ -181,6 +189,76 @@ public class ExtendedSqsClientTest {
 //        MessageSystemAttributeValue capturedMessageBody = captor.getValue().messageSystemAttributes().get(SQSExtendedClientConstants.RESERVED_ATTRIBUTE_NAME);
 //        assertTrue(capturedMessageBody.stringValue().equals("tennis"));
 //    }
+
+    @Test(expected = SdkClientException.class)
+    public void testThatANullDeleteMessageRequestThrowsAnException() {
+        DeleteMessageRequest deleteMessageRequest = null;
+        extendedSqsWithDefaultConfig.deleteMessage(deleteMessageRequest);
+    }
+
+    @Test
+    public void testThatIfLargePayloadSupportNotEnabledThenDontDeleteFromS3() {
+        DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
+                .receiptHandle(RECEIPT_HANDLE)
+                .build();
+        extendedSqsWithDefaultConfig.deleteMessage(deleteMessageRequest);
+
+        verify(mockSqsBackend).deleteMessage(any(DeleteMessageRequest.class));
+    }
+
+    @Test
+    public void testThatDeleteMessageAlsoDeletesTheS3Object() {
+        extendedSqsWithDefaultConfig.deleteMessage(DeleteMessageRequest.builder()
+                .receiptHandle(RECEIPT_HANDLE)
+                .build());
+
+        ArgumentCaptor<DeleteObjectRequest> captor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(mockS3).deleteObject(captor.capture());
+
+        DeleteObjectRequest deleteObjectRequest = captor.getValue();
+        assertThat(deleteObjectRequest.bucket(), is(S3_BUCKET_NAME));
+        assertThat(deleteObjectRequest.key(), is(S3_KEY));
+    }
+
+    @Test(expected = SdkClientException.class)
+    public void testThatANullDeleteMessageBatchRequestThrowsAnException() {
+        DeleteMessageBatchRequest deleteMessageBatchRequest = null;
+        extendedSqsWithDefaultConfig.deleteMessageBatch(deleteMessageBatchRequest);
+    }
+
+    @Test
+    public void testThatIfLargePayloadSupportNotEnabledThenDontBatchDeleteFromS3() {
+        DeleteMessageBatchRequestEntry deleteMessageBatchRequestEntry = DeleteMessageBatchRequestEntry.builder()
+                .receiptHandle(RECEIPT_HANDLE)
+                .build();
+
+        DeleteMessageBatchRequest deleteMessageBatchRequest = DeleteMessageBatchRequest.builder()
+                .entries(Collections.singletonList(deleteMessageBatchRequestEntry))
+                .build();
+        extendedSqsWithDefaultConfig.deleteMessageBatch(deleteMessageBatchRequest);
+
+        verify(mockSqsBackend).deleteMessageBatch(any(DeleteMessageBatchRequest.class));
+    }
+
+    @Test
+    public void testThatDeleteMessageBatchAlsoDeletesTheS3Object() {
+        DeleteMessageBatchRequestEntry deleteMessageBatchRequestEntry = DeleteMessageBatchRequestEntry.builder()
+                .receiptHandle(RECEIPT_HANDLE)
+                .build();
+
+        DeleteMessageBatchRequest deleteMessageBatchRequest = DeleteMessageBatchRequest.builder()
+                .entries(Collections.singletonList(deleteMessageBatchRequestEntry))
+                .build();
+
+        extendedSqsWithDefaultConfig.deleteMessageBatch(deleteMessageBatchRequest);
+
+        ArgumentCaptor<DeleteObjectRequest> captor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(mockS3).deleteObject(captor.capture());
+
+        DeleteObjectRequest deleteObjectRequest = captor.getValue();
+        assertThat(deleteObjectRequest.bucket(), is(S3_BUCKET_NAME));
+        assertThat(deleteObjectRequest.key(), is(S3_KEY));
+    }
 
     private SendMessageRequest getSendMessageRequest(int length) {
         String messageBody = generateStringWithLength(length);
